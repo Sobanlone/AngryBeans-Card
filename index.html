@@ -639,8 +639,8 @@ function tick(){
   var sliderVol=parseFloat(document.getElementById('musicVol').value)||0.5;
 
   var sum=0, count=0;
-  var lo=Math.floor(_data.length*0.60);
-  var hi=Math.floor(_data.length*0.80);
+  var lo=Math.floor(_data.length*0.55);
+  var hi=Math.floor(_data.length*0.85);
   for(var i=lo;i<hi;i++){sum+=_data[i];count++;}
   var raw=sum/count/255;
 
