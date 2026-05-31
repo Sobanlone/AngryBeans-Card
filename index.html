@@ -481,15 +481,17 @@ canvas#fov{position:absolute;inset:0;width:100%;height:100%;z-index:5;pointer-ev
   resize();window.addEventListener('resize',resize);
   for(var i=0;i<240;i++) drops.push({x:Math.random()*1800,y:Math.random()*window.innerHeight,len:Math.random()*15+7,speed:Math.random()*5+8,op:Math.random()*0.32+0.09,w:Math.random()<0.3?1.4:0.7});
   function draw(){
-    var beat=window._beat||0, smooth=window._smooth||0;
-    var eff=beat*0.7+smooth*0.3;
+    var e=window._vol||0;
     ctx.clearRect(0,0,W,H);
     for(var i=0;i<drops.length;i++){
-      var d=drops[i];ctx.beginPath();
-      ctx.strokeStyle='rgba(175,155,115,'+(d.op*(1+eff*0.6))+')';
-      ctx.lineWidth=d.w*(1+eff*0.5);
-      ctx.moveTo(d.x,d.y);ctx.lineTo(d.x-1.5*(1+eff*2),d.y+d.len*(1+eff*1.5));ctx.stroke();
-      d.y+=d.speed*(1+eff*2.5);
+      var d=drops[i];
+      ctx.beginPath();
+      ctx.strokeStyle='rgba(175,155,115,'+(d.op*(1+e*0.7))+')';
+      ctx.lineWidth=d.w*(1+e*0.5);
+      ctx.moveTo(d.x,d.y);
+      ctx.lineTo(d.x-1.5*(1+e*2),d.y+d.len*(1+e*1.2));
+      ctx.stroke();
+      d.y+=d.speed*(1+e*2.2);
       if(d.y>H+d.len){d.y=-d.len;d.x=Math.random()*W;}
     }
     requestAnimationFrame(draw);
@@ -507,61 +509,75 @@ canvas#fov{position:absolute;inset:0;width:100%;height:100%;z-index:5;pointer-ev
     var mx=(x1+x2)/2+(Math.random()-0.5)*d,my=(y1+y2)/2+(Math.random()-0.5)*d*0.4;
     bolt(x1,y1,mx,my,d/2,depth-1);bolt(mx,my,x2,y2,d/2,depth-1);
   }
-  function doFlash(strength){
-    strength=Math.min(1,strength||0.5);
+  function doFlash(s){
+    s=Math.min(1,s||0.5);
     lx.clearRect(0,0,W,H);
     var sx=W*0.2+Math.random()*W*0.6;
-    lx.strokeStyle='rgba(155,106,191,'+(0.4+strength*0.6)+')';
-    lx.lineWidth=0.8+strength*2.2;
-    lx.shadowBlur=8+strength*22;lx.shadowColor='rgba(155,106,191,0.5)';
-    bolt(sx,0,sx+(Math.random()-0.5)*150,H*(0.3+strength*0.4),65+strength*65,7);
+    lx.strokeStyle='rgba(155,106,191,'+(0.35+s*0.65)+')';
+    lx.lineWidth=0.8+s*2;
+    lx.shadowBlur=8+s*20;lx.shadowColor='rgba(155,106,191,0.5)';
+    bolt(sx,0,sx+(Math.random()-0.5)*140,H*(0.3+s*0.38),65+s*60,7);
     lx.shadowBlur=0;
     var ov=document.createElement('div');
-    var col=strength>0.6?'rgba(139,26,26,'+(strength*0.06)+')':'rgba(106,74,138,'+(strength*0.05)+')';
+    var col=s>0.55?'rgba(139,26,26,'+(s*0.06)+')':'rgba(106,74,138,'+(s*0.05)+')';
     ov.style.cssText='position:fixed;inset:0;background:'+col+';pointer-events:none;z-index:9;';
     document.body.appendChild(ov);
-    var dur=55+strength*90;
+    var dur=55+s*85;
     setTimeout(function(){lx.clearRect(0,0,W,H);},dur);
-    setTimeout(function(){ov.style.opacity='0';ov.style.transition='opacity 0.2s';setTimeout(function(){if(ov.parentNode)ov.parentNode.removeChild(ov);},220);},dur);
+    setTimeout(function(){ov.style.opacity='0';ov.style.transition='opacity 0.18s';setTimeout(function(){if(ov.parentNode)ov.parentNode.removeChild(ov);},200);},dur);
   }
   window._triggerLightning=doFlash;
-  // ambient when music off
+  // ambient lightning when music is off
   function ambient(){
-    if(!window._musicPlaying) doFlash(0.35+Math.random()*0.3);
-    setTimeout(ambient,7000+Math.random()*11000);
+    if(!window._musicPlaying) doFlash(0.3+Math.random()*0.35);
+    setTimeout(ambient,7000+Math.random()*10000);
   }
   setTimeout(ambient,3000+Math.random()*4000);
+
+  // volume-driven lightning: fires periodically based on current volume
+  var lastStrike=0;
+  function volLightning(){
+    var v=window._vol||0;
+    var now=Date.now();
+    // higher volume = shorter gap between strikes (2s min, 12s max)
+    var gap=12000-v*10000;
+    if(window._musicPlaying && v>0.08 && now-lastStrike>gap){
+      doFlash(0.3+v*0.7);
+      lastStrike=now;
+    }
+    setTimeout(volLightning,400);
+  }
+  volLightning();
 })();
 
 // ── FOV / VIGNETTE ──
 (function(){
   var fc=document.getElementById('fov'),fx=fc.getContext('2d'),W,H;
-  var curA=0,curR=0.85,curE=0;
+  var cur=0; // smoothed display value
   function resize(){W=fc.width=window.innerWidth;H=fc.height=window.innerHeight;}
   resize();window.addEventListener('resize',resize);
   function draw(){
-    var beat=window._beat||0, smooth=window._smooth||0;
-    var playing=window._musicPlaying;
-    var vol=playing?(parseFloat(document.getElementById('musicVol').value)||0.5):0;
-    // targets: beat snaps vignette inward sharply, smooth holds it softly
-    var tA=playing ? Math.min(0.88,(smooth*0.35+beat*0.6)*vol) : 0;
-    var tR=playing ? (0.85-smooth*0.08-beat*0.2) : 0.85;
-    var tE=playing ? Math.max(0,(beat*0.85+smooth*0.15-0.08)*vol) : 0;
-    // fast lerp toward target on beat, slow decay
-    var spd=beat>0.12?0.38:0.055;
-    curA+=(tA-curA)*spd;
-    curR+=(tR-curR)*spd;
-    curE+=(tE-curE)*(beat>0.12?0.42:0.06);
+    var v=window._vol||0;
+    // smooth toward target — faster attack, slower release
+    var target=window._musicPlaying ? v : 0;
+    var spd=target>cur ? 0.09 : 0.04;
+    cur+=(target-cur)*spd;
+
     fx.clearRect(0,0,W,H);
-    if(curA>0.004){
-      var grad=fx.createRadialGradient(W/2,H/2,H*Math.max(0.04,curR*0.38),W/2,H/2,H*(curR+0.12));
+    if(cur>0.008){
+      // vignette: inner radius shrinks as volume rises (FOV tightening effect)
+      var innerR=H*(0.42-cur*0.22);
+      var outerR=H*(0.88+cur*0.1);
+      var grad=fx.createRadialGradient(W/2,H/2,Math.max(0,innerR),W/2,H/2,outerR);
       grad.addColorStop(0,'rgba(0,0,0,0)');
-      grad.addColorStop(0.6,'rgba(0,0,0,0)');
-      grad.addColorStop(1,'rgba('+Math.floor(curE*55)+',0,'+Math.floor(55+curE*75)+','+curA+')');
+      grad.addColorStop(0.55,'rgba(0,0,0,0)');
+      grad.addColorStop(1,'rgba('+Math.floor(cur*50)+',0,'+Math.floor(50+cur*80)+','+Math.min(0.88,cur*0.85)+')');
       fx.fillStyle=grad;fx.fillRect(0,0,W,H);
-      if(curE>0.07){
-        fx.strokeStyle='rgba(155,106,191,'+(curE*0.8)+')';
-        fx.lineWidth=1.5+curE*11;
+      // edge glow border at higher volumes
+      if(cur>0.2){
+        var edgeAlpha=(cur-0.2)*0.9;
+        fx.strokeStyle='rgba(155,106,191,'+Math.min(0.75,edgeAlpha)+')';
+        fx.lineWidth=1+cur*10;
         fx.strokeRect(0,0,W,H);
       }
     }
@@ -571,117 +587,74 @@ canvas#fov{position:absolute;inset:0;width:100%;height:100%;z-index:5;pointer-ev
 })();
 
 // ── AUDIO ENGINE ──
-// The key fix: use MULTI-BAND analysis so mid-frequency instruments
-// (strings, synths, melodic content) also drive the effects,
-// not just bass/percussion spikes.
-var _actx=null,_analyser=null,_bassAn=null,_midAn=null;
-var _data=null,_bassData=null,_midData=null;
-window._beat=0; window._smooth=0; window._musicPlaying=false;
-
-// Beat detection state
-var _bassHist=[],_midHist=[],_HIST=43;
-var _cooldown=false, _lastBeatTime=0;
+// Pure volume-based: measures RMS across full spectrum,
+// smoothed to track the song's natural energy level throughout
+var _actx=null,_an=null,_data=null;
+window._vol=0;
+window._musicPlaying=false;
 
 function initAudio(){
   if(_actx) return;
   _actx=new(window.AudioContext||window.webkitAudioContext)();
   var el=document.getElementById('bgAudio');
   var src=_actx.createMediaElementSource(el);
-
-  // Three analysers: full / bass / mid
-  _analyser=_actx.createAnalyser();
-  _analyser.fftSize=1024; _analyser.smoothingTimeConstant=0.82;
-
-  _bassAn=_actx.createAnalyser();
-  _bassAn.fftSize=512; _bassAn.smoothingTimeConstant=0.55;
-
-  _midAn=_actx.createAnalyser();
-  _midAn.fftSize=512; _midAn.smoothingTimeConstant=0.5;
-
-  src.connect(_analyser);
-  src.connect(_bassAn);
-  src.connect(_midAn);
-  _analyser.connect(_actx.destination);
-
-  _data=new Uint8Array(_analyser.frequencyBinCount);
-  _bassData=new Uint8Array(_bassAn.frequencyBinCount);
-  _midData=new Uint8Array(_midAn.frequencyBinCount);
-
+  _an=_actx.createAnalyser();
+  _an.fftSize=1024;
+  // key setting: smoothingTimeConstant controls how fast it reacts
+  // 0.75 = smooth enough to follow melody, fast enough to feel alive
+  _an.smoothingTimeConstant=0.75;
+  src.connect(_an);
+  _an.connect(_actx.destination);
+  _data=new Uint8Array(_an.frequencyBinCount);
   tick();
 }
 
-function bandAvg(arr, data, fromPct, toPct){
-  // average a frequency band by percentage of bin range
-  var lo=Math.floor(data.length*fromPct);
-  var hi=Math.floor(data.length*toPct);
-  var sum=0;
-  for(var i=lo;i<hi;i++) sum+=arr[i];
-  return sum/(hi-lo)/255;
-}
+// rolling average to normalize against the song's own level
+var _hist=[], _HLEN=90; // ~1.5s of history at 60fps
 
 function tick(){
   requestAnimationFrame(tick);
-  if(!_analyser) return;
+  if(!_an||!window._musicPlaying){window._vol*=0.92;applyCardGlow();return;}
 
-  _analyser.getByteFrequencyData(_data);
-  _bassAn.getByteFrequencyData(_bassData);
-  _midAn.getByteFrequencyData(_midData);
+  _an.getByteFrequencyData(_data);
 
-  // overall smooth energy (wide band)
-  var overall=bandAvg(_data,_data,0,0.75);
-  window._smooth+=(overall-window._smooth)*0.1;
+  // RMS-style average across meaningful frequency range (skip sub-bass silence)
+  var sum=0, count=0;
+  var lo=Math.floor(_data.length*0.02); // skip very low bins (silence/hum)
+  var hi=Math.floor(_data.length*0.80); // skip ultra-high (usually empty)
+  for(var i=lo;i<hi;i++){sum+=_data[i];count++;}
+  var raw=sum/count/255; // 0..1
 
-  // bass band (kick, bass ~20-250Hz → 0-12% of bins)
-  var bass=bandAvg(_bassData,_bassData,0,0.12);
-  // mid band (melody, strings ~250-4kHz → 12-55% of bins)
-  var mid=bandAvg(_midData,_midData,0.12,0.55);
-  // combined beat signal: weighted bass+mid so melodic passages also react
-  var combined=bass*0.65+mid*0.35;
+  // keep rolling history to normalize: vol = how loud NOW vs recent average
+  _hist.push(raw);
+  if(_hist.length>_HLEN) _hist.shift();
+  var avg=_hist.reduce(function(a,b){return a+b;},0)/_hist.length;
 
-  _bassHist.push(bass); if(_bassHist.length>_HIST) _bassHist.shift();
-  _midHist.push(mid);   if(_midHist.length>_HIST)  _midHist.shift();
+  // normalized: 0 = at average, 1 = significantly above average
+  // floor of 0.15 raw ensures quiet songs still trigger something
+  var norm=avg>0.01 ? Math.min(1,(raw/Math.max(avg,0.15))-0.7)*2.5 : 0;
+  norm=Math.max(0,norm);
 
-  var bassAvg=_bassHist.reduce(function(a,b){return a+b;},0)/_bassHist.length;
-  var midAvg =_midHist.reduce(function(a,b){return a+b;},0)/_midHist.length;
+  // blend: part normalized (reactive), part raw (feels the overall energy)
+  var blended=norm*0.6 + raw*1.2;
+  blended=Math.min(1,Math.max(0,blended));
 
-  // Dynamic threshold: adapts to the song's overall level
-  // Lower multiplier = more sensitive = reacts to melodic content too
-  var now=Date.now();
-  var bassBeats= !_cooldown && bass>bassAvg*1.28 && bass>0.08;
-  var midBeats = !_cooldown && mid >midAvg *1.22 && mid >0.06;
-  var isBeat=(bassBeats||midBeats) && window._musicPlaying && (now-_lastBeatTime>220);
+  // smooth it toward current value
+  window._vol+=(blended-window._vol)*0.12;
 
-  if(isBeat){
-    var strength=Math.min(1, combined*2.2);
-    window._beat=strength;
-    _cooldown=true; _lastBeatTime=now;
-    // trigger lightning on notable beats
-    if(strength>0.28 && window._triggerLightning) window._triggerLightning(strength);
-    // card glow
-    var card=document.getElementById('mainCard');
-    var av=document.getElementById('avatarWrap');
-    var g='0 0 '+(8+strength*38)+'px rgba(106,74,138,'+(0.12+strength*0.48)+'),0 0 '+(strength*65)+'px rgba(139,26,26,'+(strength*0.18)+')';
-    card.style.boxShadow=g;
-    card.style.borderColor='rgba(155,106,191,'+(0.25+strength*0.6)+')';
-    av.style.boxShadow='0 0 '+(strength*26)+'px rgba(155,106,191,'+(strength*0.7)+')';
-    setTimeout(function(){_cooldown=false;},220);
-  }
+  applyCardGlow();
+}
 
-  // beat decays fast
-  window._beat*=0.78;
-  if(window._beat<0.008) window._beat=0;
-
-  // soft card glow follows smooth energy when no beat
-  if(window._beat<0.04){
-    var s=window._smooth*(parseFloat(document.getElementById('musicVol').value)||0.5);
-    var card=document.getElementById('mainCard');
-    if(s>0.03){
-      card.style.boxShadow='0 0 '+(5+s*18)+'px rgba(106,74,138,'+(0.06+s*0.18)+')';
-      card.style.borderColor='rgba(106,74,138,'+(0.15+s*0.28)+')';
-    }else{
-      card.style.boxShadow='';card.style.borderColor='';
-      document.getElementById('avatarWrap').style.boxShadow='';
-    }
+function applyCardGlow(){
+  var v=window._vol;
+  var card=document.getElementById('mainCard');
+  var av=document.getElementById('avatarWrap');
+  if(v>0.04){
+    card.style.boxShadow='0 0 '+(6+v*36)+'px rgba(106,74,138,'+(0.08+v*0.42)+'),0 0 '+(v*60)+'px rgba(139,26,26,'+(v*0.14)+')';
+    card.style.borderColor='rgba(155,106,191,'+(0.18+v*0.55)+')';
+    av.style.boxShadow='0 0 '+(v*24)+'px rgba(155,106,191,'+(v*0.65)+')';
+  }else{
+    card.style.boxShadow='';card.style.borderColor='';av.style.boxShadow='';
   }
 }
 
@@ -698,9 +671,6 @@ function toggleMusic(){
     btn.classList.remove('playing');
     icon.className='ti ti-player-play-filled';
     bars.classList.remove('active');
-    window._beat=0;window._smooth=0;
-    document.getElementById('mainCard').style.cssText='';
-    document.getElementById('avatarWrap').style.boxShadow='';
   }else{
     el.play();_playing=true;window._musicPlaying=true;
     btn.classList.add('playing');
@@ -751,9 +721,6 @@ function closeModal(){
 }
 function handleBdClick(e){if(e.target===document.getElementById('modalBd'))closeModal();}
 function handleSend(){
-  var n=document.getElementById('mName').value.trim();
-  var m=document.getElementById('mMsg').value.trim();
-  // no longer required — just show confirmation
   document.getElementById('mForm').style.display='none';
   document.getElementById('sentOk').style.display='block';
   setTimeout(closeModal,3200);
