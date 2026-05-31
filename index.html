@@ -269,7 +269,7 @@ canvas#fov{position:absolute;inset:0;width:100%;height:100%;z-index:5;pointer-ev
   </button>
   <input class="music-vol" type="range" id="musicVol" min="0" max="1" step="0.01" value="0.5" oninput="setVolume(this.value)" title="Volume">
   <div class="music-label" id="musicLabel" onclick="toggleLabel()" title="Click to see full name">Jane Doe LMS</div>
-  <audio id="bgAudio" loop><source src="Jane Doe LMS Forsaken OST Cover.mp3" type="audio/mpeg"></audio>
+  <audio id="bgAudio" loop onerror="console.error('Audio load error:',this.error)"><source src="music.mp3" type="audio/mpeg"></audio>
 </div>
 
 <div class="page">
@@ -659,23 +659,33 @@ function applyCardGlow(){
 }
 
 // ── MUSIC CONTROLS ──
-var _playing=false;
+var _playing=false, _busy=false;
 function toggleMusic(){
+  if(_busy) return;
   var el=document.getElementById('bgAudio');
   var btn=document.getElementById('musicBtn');
   var icon=document.getElementById('musicIcon');
   var bars=document.getElementById('musicBars');
   initAudio();
   if(_playing){
-    el.pause();_playing=false;window._musicPlaying=false;
+    _playing=false;window._musicPlaying=false;
+    el.pause();
     btn.classList.remove('playing');
     icon.className='ti ti-player-play-filled';
     bars.classList.remove('active');
   }else{
-    el.play();_playing=true;window._musicPlaying=true;
-    btn.classList.add('playing');
-    icon.className='ti ti-player-pause-filled';
-    bars.classList.add('active');
+    _busy=true;
+    if(_actx&&_actx.state==="suspended") _actx.resume();
+    el.play().then(function(){
+      _playing=true;window._musicPlaying=true;
+      btn.classList.add('playing');
+      icon.className='ti ti-player-pause-filled';
+      bars.classList.add('active');
+      _busy=false;
+    }).catch(function(e){
+      console.error('Audio play failed:',e);
+      _busy=false;
+    });
   }
 }
 function setVolume(v){document.getElementById('bgAudio').volume=parseFloat(v);}
