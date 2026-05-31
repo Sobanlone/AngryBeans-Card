@@ -605,16 +605,16 @@ canvas#fov{position:absolute;inset:0;width:100%;height:100%;z-index:5;pointer-ev
   function resize(){W=c.width=window.innerWidth;H=c.height=window.innerHeight;}
   resize();window.addEventListener('resize',resize);
   for(var i=0;i<240;i++) drops.push({x:Math.random()*1800,y:Math.random()*window.innerHeight,len:Math.random()*15+7,speed:Math.random()*5+8,op:Math.random()*0.32+0.09,w:Math.random()<0.3?1.4:0.7});
-  window._rainDrops=drops;window._rainCtx=ctx;window._rainW=function(){return W;};window._rainH=function(){return H;};
   function draw(){
-    var intensity=window._audioIntensity||0;
-    var speedMult=1+intensity*2.5;
-    var opMult=1+intensity*0.8;
+    var beat=window._beatIntensity||0;
+    var smooth=window._audioIntensity||0;
+    var eff=Math.max(beat,smooth*0.5);
+    var speedMult=1+eff*3.5;
     ctx.clearRect(0,0,W,H);
     for(var i=0;i<drops.length;i++){
       var d=drops[i];ctx.beginPath();
-      ctx.strokeStyle='rgba(175,155,115,'+(d.op*opMult)+')';
-      ctx.lineWidth=d.w*(1+intensity*0.5);
+      ctx.strokeStyle='rgba(175,155,115,'+(d.op*(1+eff*0.8))+')';
+      ctx.lineWidth=d.w*(1+eff*0.7);
       ctx.moveTo(d.x,d.y);ctx.lineTo(d.x-2*speedMult,d.y+d.len*speedMult);ctx.stroke();
       d.y+=d.speed*speedMult;if(d.y>H+d.len){d.y=-d.len;d.x=Math.random()*W;}
     }
@@ -628,97 +628,192 @@ canvas#fov{position:absolute;inset:0;width:100%;height:100%;z-index:5;pointer-ev
   var lc=document.getElementById('lightning'),lx=lc.getContext('2d'),W,H;
   function resize(){W=lc.width=window.innerWidth;H=lc.height=window.innerHeight;}
   resize();window.addEventListener('resize',resize);
+  var lastBeat=0;
   function bolt(x1,y1,x2,y2,d,depth){
     if(d<2||depth<=0){lx.beginPath();lx.moveTo(x1,y1);lx.lineTo(x2,y2);lx.stroke();return;}
     var mx=(x1+x2)/2+(Math.random()-0.5)*d,my=(y1+y2)/2+(Math.random()-0.5)*d*0.4;
     bolt(x1,y1,mx,my,d/2,depth-1);bolt(mx,my,x2,y2,d/2,depth-1);
   }
-  function flash(){
-    var intensity=window._audioIntensity||0;
+  function doFlash(forced){
+    var beat=window._beatIntensity||0;
+    var smooth=window._audioIntensity||0;
+    var eff=forced?Math.max(beat,0.4):Math.max(beat,smooth*0.3);
     lx.clearRect(0,0,W,H);
-    var sx=W*0.25+Math.random()*W*0.5;
-    var alpha=0.5+intensity*0.5;
-    lx.strokeStyle='rgba(155,106,191,'+alpha+')';lx.lineWidth=1+intensity;
-    bolt(sx,0,sx+(Math.random()-0.5)*120,H*(0.4+intensity*0.3),75+intensity*40,7);
-    var col=intensity>0.5?'rgba(139,26,26,0.04)':'rgba(106,74,138,0.025)';
+    var sx=W*0.2+Math.random()*W*0.6;
+    var alpha=Math.min(0.95,0.45+eff*0.7);
+    lx.strokeStyle='rgba(155,106,191,'+alpha+')';
+    lx.lineWidth=0.8+eff*2;
+    lx.shadowBlur=10+eff*20;
+    lx.shadowColor='rgba(155,106,191,0.6)';
+    bolt(sx,0,sx+(Math.random()-0.5)*140,H*(0.35+eff*0.35),70+eff*60,7);
+    lx.shadowBlur=0;
+    // screen flash
+    var col=eff>0.5?'rgba(139,26,26,'+(eff*0.07)+')':'rgba(106,74,138,'+(eff*0.05)+')';
     var ov=document.createElement('div');
-    ov.style.cssText='position:fixed;inset:0;background:'+col+';pointer-events:none;z-index:9;';
+    ov.style.cssText='position:fixed;inset:0;background:'+col+';pointer-events:none;z-index:9;transition:opacity 0.15s;';
     document.body.appendChild(ov);
-    setTimeout(function(){lx.clearRect(0,0,W,H);if(ov.parentNode)document.body.removeChild(ov);},90+intensity*60);
-    var nextDelay=intensity>0.6?(2000+Math.random()*4000):(7000+Math.random()*11000);
-    setTimeout(flash,nextDelay);
+    var dur=60+eff*100;
+    setTimeout(function(){lx.clearRect(0,0,W,H);},dur);
+    setTimeout(function(){ov.style.opacity=0;setTimeout(function(){if(ov.parentNode)document.body.removeChild(ov);},200);},dur);
   }
-  setTimeout(flash,2500+Math.random()*3000);
+  // ambient lightning loop (when music off)
+  function ambientLoop(){
+    if(!window._musicPlaying) doFlash(false);
+    setTimeout(ambientLoop,6000+Math.random()*12000);
+  }
+  setTimeout(ambientLoop,2500+Math.random()*3000);
+  // beat-triggered lightning
+  window._triggerLightning=function(){ doFlash(true); };
 })();
 
 // ── FOV / VIGNETTE ──
 (function(){
   var fc=document.getElementById('fov'),fx=fc.getContext('2d'),W,H;
+  var currentAlpha=0, targetAlpha=0;
+  var currentRadius=0.8, targetRadius=0.8;
+  var currentEdge=0, targetEdge=0;
   function resize(){W=fc.width=window.innerWidth;H=fc.height=window.innerHeight;}
   resize();window.addEventListener('resize',resize);
   function drawFov(){
-    var intensity=window._audioIntensity||0;
-    if(intensity<0.05){fc.style.opacity=0;requestAnimationFrame(drawFov);return;}
-    fc.style.opacity=1;
+    var beat=window._beatIntensity||0;
+    var smooth=window._audioIntensity||0;
+    var vol=window._musicPlaying?(document.getElementById('bgAudio').volume||0.5):0;
+
+    // targets snap on beat, ease off
+    targetAlpha  = Math.min(0.92, smooth*0.4 + beat*0.65) * vol;
+    targetRadius = 0.85 - smooth*0.1 - beat*0.22;  // shrinks inward on beat (FOV tighten)
+    targetEdge   = Math.max(0, beat*0.9 + smooth*0.2 - 0.1) * vol;
+
+    // fast lerp toward target on beat, slow lerp back
+    var lerpA = beat>0.15 ? 0.35 : 0.06;
+    var lerpR = beat>0.15 ? 0.3  : 0.05;
+    var lerpE = beat>0.15 ? 0.4  : 0.07;
+
+    currentAlpha  += (targetAlpha  - currentAlpha)  * lerpA;
+    currentRadius += (targetRadius - currentRadius) * lerpR;
+    currentEdge   += (targetEdge   - currentEdge)   * lerpE;
+
     fx.clearRect(0,0,W,H);
-    var grad=fx.createRadialGradient(W/2,H/2,H*(0.2-intensity*0.15),W/2,H/2,H*(0.8+intensity*0.3));
-    grad.addColorStop(0,'rgba(0,0,0,0)');
-    grad.addColorStop(0.6,'rgba(0,0,0,0)');
-    grad.addColorStop(1,'rgba('+Math.floor(intensity*80)+','+Math.floor(intensity*10)+','+Math.floor(intensity*90)+','+(0.3+intensity*0.55)+')');
-    fx.fillStyle=grad;
-    fx.fillRect(0,0,W,H);
-    // chromatic edge at high intensity
-    if(intensity>0.6){
-      var edgeAlpha=(intensity-0.6)*0.8;
-      fx.strokeStyle='rgba(155,106,191,'+edgeAlpha+')';
-      fx.lineWidth=3+intensity*8;
-      fx.strokeRect(0,0,W,H);
+
+    if(currentAlpha > 0.005){
+      fc.style.opacity=1;
+      // radial vignette
+      var grad=fx.createRadialGradient(W/2,H/2, H*Math.max(0.05,currentRadius*0.4), W/2,H/2, H*(currentRadius+0.1));
+      grad.addColorStop(0,'rgba(0,0,0,0)');
+      grad.addColorStop(0.65,'rgba(0,0,0,0)');
+      grad.addColorStop(1,'rgba('+Math.floor(currentEdge*60)+',0,'+Math.floor(60+currentEdge*80)+','+currentAlpha+')');
+      fx.fillStyle=grad;
+      fx.fillRect(0,0,W,H);
+
+      // chromatic edge border on strong beats
+      if(currentEdge>0.08){
+        fx.strokeStyle='rgba(155,106,191,'+(currentEdge*0.85)+')';
+        fx.lineWidth=2+currentEdge*12;
+        fx.strokeRect(0,0,W,H);
+      }
+    } else {
+      fc.style.opacity=0;
     }
     requestAnimationFrame(drawFov);
   }
   drawFov();
 })();
 
-// ── AUDIO ANALYSER ──
-var audioCtx=null,analyser=null,dataArr=null;
+// ── BEAT DETECTION + AUDIO ANALYSER ──
+var audioCtx=null, analyser=null, dataArr=null, bassArr=null, bassAnalyser=null;
 window._audioIntensity=0;
+window._beatIntensity=0;
+window._musicPlaying=false;
+
+var beatThreshold=1.4, beatCooldown=false, beatDecay=0;
 
 function initAudio(){
   if(audioCtx) return;
   audioCtx=new(window.AudioContext||window.webkitAudioContext)();
   var audio=document.getElementById('bgAudio');
   var src=audioCtx.createMediaElementSource(audio);
+
+  // main analyser (full spectrum for overall intensity)
   analyser=audioCtx.createAnalyser();
-  analyser.fftSize=256;
-  analyser.smoothingTimeConstant=0.75;
+  analyser.fftSize=512;
+  analyser.smoothingTimeConstant=0.8;
+
+  // bass analyser (low freq for beat detection)
+  bassAnalyser=audioCtx.createAnalyser();
+  bassAnalyser.fftSize=256;
+  bassAnalyser.smoothingTimeConstant=0.3;  // less smooth = snappier beats
+
   src.connect(analyser);
+  src.connect(bassAnalyser);
   analyser.connect(audioCtx.destination);
+
   dataArr=new Uint8Array(analyser.frequencyBinCount);
+  bassArr=new Uint8Array(bassAnalyser.frequencyBinCount);
+
   tickAnalyser();
 }
 
+var bassHistory=[], bassHistLen=40;
+
 function tickAnalyser(){
-  if(!analyser){requestAnimationFrame(tickAnalyser);return;}
+  requestAnimationFrame(tickAnalyser);
+  if(!analyser) return;
+
+  // overall intensity (smooth)
   analyser.getByteFrequencyData(dataArr);
   var sum=0;
   for(var i=0;i<dataArr.length;i++) sum+=dataArr[i];
-  var avg=sum/dataArr.length;
-  var raw=avg/128;
-  window._audioIntensity+=(raw-window._audioIntensity)*0.18;
-  // card beat pulse
-  var card=document.getElementById('mainCard');
-  var avatar=document.getElementById('avatarWrap');
-  var vol=document.getElementById('bgAudio').volume;
-  var eff=window._audioIntensity*vol;
-  if(eff>0.05){
-    var glow='0 0 '+(8+eff*30)+'px rgba(106,74,138,'+(0.1+eff*0.35)+'), 0 0 '+(eff*60)+'px rgba(139,26,26,'+(eff*0.15)+')';
+  var rawSmooth=(sum/dataArr.length)/128;
+  window._audioIntensity+=(rawSmooth-window._audioIntensity)*0.12;
+
+  // bass-focused beat detection
+  bassAnalyser.getByteFrequencyData(bassArr);
+  var bassSum=0, bassCount=Math.floor(bassArr.length*0.15); // only lowest 15% = kick/bass
+  for(var i=0;i<bassCount;i++) bassSum+=bassArr[i];
+  var bassVal=bassSum/bassCount/255;
+
+  bassHistory.push(bassVal);
+  if(bassHistory.length>bassHistLen) bassHistory.shift();
+  var bassAvg=bassHistory.reduce(function(a,b){return a+b;},0)/bassHistory.length;
+
+  var vol=document.getElementById('bgAudio').volume||0.5;
+
+  // beat fired when current bass is significantly above recent average
+  var isBeat=(!beatCooldown) && (bassVal > bassAvg*beatThreshold) && (bassVal > 0.15) && window._musicPlaying;
+
+  if(isBeat){
+    window._beatIntensity=Math.min(1, bassVal*1.6);
+    beatCooldown=true;
+    // trigger lightning on strong beats
+    if(window._beatIntensity>0.35 && window._triggerLightning) window._triggerLightning();
+    // card beat pulse
+    var card=document.getElementById('mainCard');
+    var avatar=document.getElementById('avatarWrap');
+    var bi=window._beatIntensity;
+    var glow='0 0 '+(10+bi*40)+'px rgba(106,74,138,'+(0.15+bi*0.5)+'), 0 0 '+(bi*70)+'px rgba(139,26,26,'+(bi*0.2)+')';
     card.style.boxShadow=glow;
-    card.style.borderColor='rgba(106,74,138,'+(0.3+eff*0.5)+')';
-    avatar.style.boxShadow='0 0 '+(eff*20)+'px rgba(155,106,191,'+(eff*0.6)+')';
-  } else {
-    card.style.boxShadow='';card.style.borderColor='';avatar.style.boxShadow='';
+    card.style.borderColor='rgba(155,106,191,'+(0.3+bi*0.6)+')';
+    avatar.style.boxShadow='0 0 '+(bi*28)+'px rgba(155,106,191,'+(bi*0.75)+')';
+    // cooldown: min gap between beats ~250ms
+    setTimeout(function(){beatCooldown=false;},250);
   }
-  requestAnimationFrame(tickAnalyser);
+
+  // beat intensity decays fast between hits
+  window._beatIntensity*=0.82;
+  if(window._beatIntensity<0.01) window._beatIntensity=0;
+
+  // decay card glow smoothly when no beat
+  if(!isBeat && window._beatIntensity<0.05){
+    var card=document.getElementById('mainCard');
+    var smooth=window._audioIntensity*vol;
+    if(smooth>0.04){
+      card.style.boxShadow='0 0 '+(6+smooth*20)+'px rgba(106,74,138,'+(0.08+smooth*0.2)+')';
+      card.style.borderColor='rgba(106,74,138,'+(0.2+smooth*0.3)+')';
+    } else {
+      card.style.boxShadow='';card.style.borderColor='';
+      document.getElementById('avatarWrap').style.boxShadow='';
+    }
+  }
 }
 
 // ── MUSIC CONTROLS ──
@@ -730,23 +825,22 @@ function toggleMusic(){
   var bars=document.getElementById('musicBars');
   initAudio();
   if(isPlaying){
-    audio.pause();isPlaying=false;
+    audio.pause();isPlaying=false;window._musicPlaying=false;
     btn.classList.remove('playing');
     icon.className='ti ti-player-play-filled';
     bars.classList.remove('active');
-    window._audioIntensity=0;
+    window._audioIntensity=0;window._beatIntensity=0;
     document.getElementById('mainCard').style.boxShadow='';
     document.getElementById('mainCard').style.borderColor='';
+    document.getElementById('avatarWrap').style.boxShadow='';
   }else{
-    audio.play();isPlaying=true;
+    audio.play();isPlaying=true;window._musicPlaying=true;
     btn.classList.add('playing');
     icon.className='ti ti-player-pause-filled';
     bars.classList.add('active');
   }
 }
-function setVolume(v){
-  document.getElementById('bgAudio').volume=parseFloat(v);
-}
+function setVolume(v){ document.getElementById('bgAudio').volume=parseFloat(v); }
 
 // ── TABS ──
 function switchTab(name,btn){
