@@ -587,8 +587,6 @@ canvas#fov{position:absolute;inset:0;width:100%;height:100%;z-index:5;pointer-ev
 })();
 
 // ── AUDIO ENGINE ──
-// Pure volume-based: measures RMS across full spectrum,
-// smoothed to track the song's natural energy level throughout
 var _actx=null,_an=null,_data=null;
 window._vol=0;
 window._musicPlaying=false;
@@ -600,14 +598,33 @@ function initAudio(){
   var src=_actx.createMediaElementSource(el);
   _an=_actx.createAnalyser();
   _an.fftSize=1024;
-  // key setting: smoothingTimeConstant controls how fast it reacts
-  // 0.75 = smooth enough to follow melody, fast enough to feel alive
   _an.smoothingTimeConstant=0.75;
   src.connect(_an);
   _an.connect(_actx.destination);
   _data=new Uint8Array(_an.frequencyBinCount);
   tick();
 }
+
+// Autoplay on first user interaction anywhere on the page
+var _started=false;
+function tryAutoplay(){
+  if(_started) return;
+  _started=true;
+  initAudio();
+  var el=document.getElementById('bgAudio');
+  if(_actx&&_actx.state==="suspended") _actx.resume();
+  el.play().then(function(){
+    window._musicPlaying=true;
+    document.getElementById('musicBtn').classList.add('playing');
+    document.getElementById('musicIcon').className='ti ti-player-pause-filled';
+    document.getElementById('musicBars').classList.add('active');
+  }).catch(function(e){ console.log('Autoplay blocked, waiting for click:', e); });
+}
+// Try immediately (works on some browsers), then on first interaction
+tryAutoplay();
+['click','keydown','touchstart','scroll'].forEach(function(ev){
+  document.addEventListener(ev, tryAutoplay, {once:true});
+});
 
 // rolling average to normalize against the song's own level
 var _hist=[], _HLEN=90; // ~1.5s of history at 60fps
@@ -659,33 +676,26 @@ function applyCardGlow(){
 }
 
 // ── MUSIC CONTROLS ──
-var _playing=false, _busy=false;
 function toggleMusic(){
-  if(_busy) return;
   var el=document.getElementById('bgAudio');
   var btn=document.getElementById('musicBtn');
   var icon=document.getElementById('musicIcon');
   var bars=document.getElementById('musicBars');
-  initAudio();
-  if(_playing){
-    _playing=false;window._musicPlaying=false;
+  // first click starts everything if autoplay was blocked
+  if(!_started){ tryAutoplay(); return; }
+  if(window._musicPlaying){
     el.pause();
+    window._musicPlaying=false;
     btn.classList.remove('playing');
     icon.className='ti ti-player-play-filled';
     bars.classList.remove('active');
   }else{
-    _busy=true;
     if(_actx&&_actx.state==="suspended") _actx.resume();
-    el.play().then(function(){
-      _playing=true;window._musicPlaying=true;
-      btn.classList.add('playing');
-      icon.className='ti ti-player-pause-filled';
-      bars.classList.add('active');
-      _busy=false;
-    }).catch(function(e){
-      console.error('Audio play failed:',e);
-      _busy=false;
-    });
+    el.play().catch(function(e){console.error(e);});
+    window._musicPlaying=true;
+    btn.classList.add('playing');
+    icon.className='ti ti-player-pause-filled';
+    bars.classList.add('active');
   }
 }
 function setVolume(v){document.getElementById('bgAudio').volume=parseFloat(v);}
