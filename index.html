@@ -639,7 +639,7 @@ function tick(){
   var sliderVol=parseFloat(document.getElementById('musicVol').value)||0.5;
 
   var sum=0, count=0;
-  var lo=Math.floor(_data.length*0.02);
+  var lo=Math.floor(_data.length*0.50);
   var hi=Math.floor(_data.length*0.80);
   for(var i=lo;i<hi;i++){sum+=_data[i];count++;}
   var raw=sum/count/255;
