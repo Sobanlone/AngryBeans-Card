@@ -649,7 +649,7 @@ function tick(){
   var avg=_hist.reduce(function(a,b){return a+b;},0)/_hist.length;
 
   // how loud NOW vs recent average (relative reactivity)
-  var norm=avg>0.01 ? Math.min(1,(raw/Math.max(avg,0.08))-0.65)*2.2 : 0;
+  var norm=avg>0.01 ? Math.min(1,(raw/Math.max(avg,0.08))-0.65)*4.0 : 0;
   norm=Math.max(0,norm);
 
   // scale by slider: at low volume effects stay low, at full volume full effect
