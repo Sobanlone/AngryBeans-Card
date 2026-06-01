@@ -598,7 +598,7 @@ function initAudio(){
   var src=_actx.createMediaElementSource(el);
   _an=_actx.createAnalyser();
   _an.fftSize=1024;
-  _an.smoothingTimeConstant=0.75;
+  _an.smoothingTimeConstant=0.2;
   src.connect(_an);
   _an.connect(_actx.destination);
   _data=new Uint8Array(_an.frequencyBinCount);
