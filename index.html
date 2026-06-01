@@ -552,6 +552,7 @@ canvas#fov{position:absolute;inset:0;width:100%;height:100%;z-index:5;pointer-ev
         eyes.appearTimer=0;
         eyes.x=0.2+Math.random()*0.6;
         eyes.y=0.2+Math.random()*0.35;
+        eyes.sz=0.7+Math.random()*0.7;
         eyes.nextAppear=14000+Math.random()*18000;
       }
       if(eyes.phase==='appearing'){
@@ -585,8 +586,8 @@ canvas#fov{position:absolute;inset:0;width:100%;height:100%;z-index:5;pointer-ev
         var ey=(eyes.y+eyes.driftY)*H;
         var sep=W*0.028; // gap between eyes
         var blink=eyes.blinking ? Math.sin(eyes.blinkProgress*Math.PI) : 0;
-        drawEye(ctx,ex-sep,ey,eyes.alpha,blink,eyes.pupilGlow);
-        drawEye(ctx,ex+sep,ey,eyes.alpha,blink,eyes.pupilGlow);
+        drawEye(ctx,ex-sep,ey,eyes.alpha,blink,eyes.pupilGlow,eyes.sz||1.0);
+        drawEye(ctx,ex+sep,ey,eyes.alpha,blink,eyes.pupilGlow,eyes.sz||1.0);
       }
 
       // second rarer pair
@@ -596,6 +597,7 @@ canvas#fov{position:absolute;inset:0;width:100%;height:100%;z-index:5;pointer-ev
         eyes.timer2=0;
         eyes.x2=0.1+Math.random()*0.8;
         eyes.y2=0.12+Math.random()*0.25;
+        eyes.sz2=0.45+Math.random()*0.35;
       }
       if(eyes.phase2==='showing'){
         eyes.alpha2=Math.min(0.55,eyes.alpha2+dt*0.0005);
@@ -609,8 +611,8 @@ canvas#fov{position:absolute;inset:0;width:100%;height:100%;z-index:5;pointer-ev
       if(eyes.alpha2>0.005){
         var ex2=eyes.x2*W, ey2=eyes.y2*H;
         var sep2=W*0.018;
-        drawEye(ctx,ex2-sep2,ey2,eyes.alpha2,0,0.3+0.3*Math.sin(ts*0.0008));
-        drawEye(ctx,ex2+sep2,ey2,eyes.alpha2,0,0.3+0.3*Math.sin(ts*0.0008));
+        drawEye(ctx,ex2-sep2,ey2,eyes.alpha2,0,0.3+0.3*Math.sin(ts*0.0008),eyes.sz2||0.6);
+        drawEye(ctx,ex2+sep2,ey2,eyes.alpha2,0,0.3+0.3*Math.sin(ts*0.0008),eyes.sz2||0.6);
       }
     } else {
       // music playing: fade eyes out quickly
@@ -622,54 +624,113 @@ canvas#fov{position:absolute;inset:0;width:100%;height:100%;z-index:5;pointer-ev
     requestAnimationFrame(draw);
   }
 
-  function drawEye(ctx,x,y,alpha,blink,glow){
-    var rW=W*0.016, rH=H*0.028;
+  function drawEye(ctx,x,y,alpha,blink,glow,sz){
+    sz=sz||1;
+    var rW=W*(0.032*sz), rH=H*(0.052*sz);
     ctx.save();
     ctx.translate(x,y);
 
-    // outer red glow halo
-    var halo=ctx.createRadialGradient(0,0,rW*0.5,0,0,rW*3.5);
-    halo.addColorStop(0,'rgba(180,20,20,'+(alpha*0.35)+')');
-    halo.addColorStop(0.5,'rgba(120,10,10,'+(alpha*0.15)+')');
-    halo.addColorStop(1,'rgba(80,0,0,0)');
-    ctx.fillStyle=halo;
+    // subtle dark soft shadow behind the whole eye
+    var shadow=ctx.createRadialGradient(0,rH*0.1,0,0,0,rW*2.2);
+    shadow.addColorStop(0,'rgba(0,0,0,'+(alpha*0.55)+')');
+    shadow.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle=shadow;
     ctx.beginPath();
-    ctx.ellipse(0,0,rW*3.5,rH*2.5,0,0,Math.PI*2);
+    ctx.ellipse(0,rH*0.1,rW*2.2,rH*1.6,0,0,Math.PI*2);
     ctx.fill();
 
-    // blink: squish vertically
-    var blinkScale=1-blink*0.95;
-    ctx.scale(1,blinkScale);
+    // blink squish
+    var bs=1-blink*0.96;
+    ctx.scale(1,bs);
 
-    // eye white (dark but slightly lighter)
-    ctx.fillStyle='rgba(30,8,8,'+(alpha*0.9)+')';
+    // ── eye shape using bezier (almond) ──
     ctx.beginPath();
-    ctx.ellipse(0,0,rW,rH,0,0,Math.PI*2);
+    ctx.moveTo(-rW,0);
+    ctx.bezierCurveTo(-rW*0.5,-rH*1.05, rW*0.5,-rH*1.05, rW,0);
+    ctx.bezierCurveTo( rW*0.5, rH*0.85,-rW*0.5, rH*0.85,-rW,0);
+    ctx.closePath();
+
+    // sclera — off-white pinkish like the reference
+    var sclera=ctx.createRadialGradient(-rW*0.1,-rH*0.15,0,0,0,rW*1.05);
+    sclera.addColorStop(0,'rgba(235,222,218,'+(alpha*0.97)+')');
+    sclera.addColorStop(0.55,'rgba(210,195,192,'+(alpha*0.9)+')');
+    sclera.addColorStop(1,'rgba(175,158,155,'+(alpha*0.75)+')');
+    ctx.fillStyle=sclera;
     ctx.fill();
 
-    // iris — deep red
-    ctx.fillStyle='rgba(160,15,15,'+(alpha*0.95)+')';
-    ctx.beginPath();
-    ctx.ellipse(0,0,rW*0.7,rH*0.7,0,0,Math.PI*2);
-    ctx.fill();
-
-    // pupil glow
-    var pg=ctx.createRadialGradient(0,0,0,0,0,rW*0.55);
-    pg.addColorStop(0,'rgba(255,60,30,'+(alpha*(0.7+glow*0.3))+')');
-    pg.addColorStop(0.4,'rgba(200,20,10,'+(alpha*0.6)+')');
-    pg.addColorStop(1,'rgba(100,0,0,0)');
-    ctx.fillStyle=pg;
-    ctx.beginPath();
-    ctx.ellipse(0,0,rW*0.55,rH*0.55,0,0,Math.PI*2);
-    ctx.fill();
-
-    // specular dot
-    ctx.fillStyle='rgba(255,120,80,'+(alpha*0.5)+')';
-    ctx.beginPath();
-    ctx.ellipse(-rW*0.15,-rH*0.18,rW*0.1,rH*0.1,0,0,Math.PI*2);
-    ctx.fill();
-
+    // dark eyelid rim / shadow at top and bottom edges
+    ctx.save();
+    ctx.clip(); // clip to eye shape
+    // top shadow
+    var topShadow=ctx.createLinearGradient(0,-rH,0,-rH*0.2);
+    topShadow.addColorStop(0,'rgba(20,15,15,'+(alpha*0.7)+')');
+    topShadow.addColorStop(1,'rgba(20,15,15,0)');
+    ctx.fillStyle=topShadow;
+    ctx.fillRect(-rW*1.2,-rH*1.2,rW*2.4,rH*1.1);
+    // bottom shadow
+    var botShadow=ctx.createLinearGradient(0,rH*0.3,0,rH);
+    botShadow.addColorStop(0,'rgba(20,15,15,0)');
+    botShadow.addColorStop(1,'rgba(20,15,15,'+(alpha*0.55)+')');
+    ctx.fillStyle=botShadow;
+    ctx.fillRect(-rW*1.2,rH*0.2,rW*2.4,rH*0.9);
     ctx.restore();
+
+    // ── pupil — large black circle like reference ──
+    ctx.save();
+    ctx.clip();
+    // pupil slight offset down-center like reference
+    var px=rW*0.04, py=rH*0.05;
+    var pupilR=rW*0.62;
+    // pupil base — near-black with very slight dark purple tint
+    ctx.fillStyle='rgba(8,6,10,'+(alpha*0.97)+')';
+    ctx.beginPath();
+    ctx.ellipse(px,py,pupilR,pupilR*1.08,0,0,Math.PI*2);
+    ctx.fill();
+    // inner depth — pure black center
+    ctx.fillStyle='rgba(2,2,4,'+(alpha)+')';
+    ctx.beginPath();
+    ctx.ellipse(px,py,pupilR*0.72,pupilR*0.78,0,0,Math.PI*2);
+    ctx.fill();
+    // very faint white sclera gleam around pupil edge (limbal ring style)
+    var limbal=ctx.createRadialGradient(px,py,pupilR*0.78,px,py,pupilR*1.02);
+    limbal.addColorStop(0,'rgba(200,188,185,'+(alpha*0.0)+')');
+    limbal.addColorStop(1,'rgba(200,188,185,'+(alpha*0.12)+')');
+    ctx.fillStyle=limbal;
+    ctx.beginPath();
+    ctx.ellipse(px,py,pupilR*1.02,pupilR*1.1,0,0,Math.PI*2);
+    ctx.fill();
+    // specular highlight — small bright catch light top-left of pupil
+    ctx.fillStyle='rgba(240,235,230,'+(alpha*(0.55+glow*0.3))+')';
+    ctx.beginPath();
+    ctx.ellipse(px-pupilR*0.28,py-pupilR*0.3,pupilR*0.14,pupilR*0.1,-0.4,0,Math.PI*2);
+    ctx.fill();
+    // tiny secondary catch light
+    ctx.fillStyle='rgba(220,215,210,'+(alpha*0.25)+')';
+    ctx.beginPath();
+    ctx.ellipse(px+pupilR*0.22,py-pupilR*0.18,pupilR*0.07,pupilR*0.05,0.3,0,Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+
+    // outer eyelid dark outline
+    ctx.beginPath();
+    ctx.moveTo(-rW,0);
+    ctx.bezierCurveTo(-rW*0.5,-rH*1.05, rW*0.5,-rH*1.05, rW,0);
+    ctx.bezierCurveTo( rW*0.5, rH*0.85,-rW*0.5, rH*0.85,-rW,0);
+    ctx.closePath();
+    ctx.strokeStyle='rgba(18,12,12,'+(alpha*0.85)+')';
+    ctx.lineWidth=rW*0.08;
+    ctx.stroke();
+
+    // very faint ambient glow — pale, not red
+    ctx.restore();
+    var ambGlow=ctx.createRadialGradient(x,y,0,x,y,rW*2.8);
+    ambGlow.addColorStop(0,'rgba(200,185,180,'+(alpha*0.06)+')');
+    ambGlow.addColorStop(1,'rgba(200,185,180,0)');
+    ctx.fillStyle=ambGlow;
+    ctx.beginPath();
+    ctx.ellipse(x,y,rW*2.8,rH*2.2,0,0,Math.PI*2);
+    ctx.fill();
+    return; // already restored above
   }
 
   requestAnimationFrame(draw);
