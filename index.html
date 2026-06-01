@@ -497,29 +497,76 @@ canvas#fov{position:absolute;inset:0;width:100%;height:100%;z-index:5;pointer-ev
   resize();window.addEventListener('resize',resize);
   for(var i=0;i<240;i++) drops.push({x:Math.random()*1800,y:Math.random()*window.innerHeight,len:Math.random()*15+7,speed:Math.random()*5+8,op:Math.random()*0.32+0.09,w:Math.random()<0.3?1.4:0.7});
 
-  // Paranomly eye pair state
-  var eyes={
-    x:0.5, y:0.38,          // position as fraction of screen
-    alpha:0,                 // current opacity
-    targetAlpha:0,
-    blinkT:0,                // blink timer
-    nextBlink:4000+Math.random()*6000,
-    blinking:false,
-    blinkProgress:0,
-    phase:'idle',            // idle | appearing | holding | fading
-    holdTimer:0,
-    nextAppear:8000+Math.random()*12000,
-    appearTimer:0,
-    pupilGlow:0,             // inner pupil intensity
-    driftX:0, driftY:0,      // slow drift offsets
-    driftAngle:Math.random()*Math.PI*2,
-    // second pair (rarer, appears at a different position)
-    x2:0, y2:0, alpha2:0, phase2:'idle', timer2:8000+Math.random()*20000
+  // ── EYE FIELD ──
+  // Each "slot" is a fixed position in a loose grid with jitter
+  // so they feel packed like the reference but not perfectly aligned
+  var COLS=5, ROWS=5;
+  var eyeSlots=[];
+
+  function buildSlots(){
+    eyeSlots=[];
+    var cellW=1/COLS, cellH=0.72/ROWS;
+    var placed=[]; // track placed positions to avoid overlap
+    for(var row=0;row<ROWS;row++){
+      for(var col=0;col<COLS;col++){
+        if(Math.random()<0.18) continue; // random gaps
+        var sz=0.5+Math.random()*0.6;
+        // eye footprint in fractional coords — width ~9%, height ~14% of screen per sz unit
+        var eyeW=0.09*sz, eyeH=0.14*sz;
+        // try a few positions within the cell to avoid overlap
+        var best=null, bestDist=0;
+        for(var attempt=0;attempt<8;attempt++){
+          var jx=(Math.random()-0.5)*cellW*0.75;
+          var jy=(Math.random()-0.5)*cellH*0.75;
+          var tx=cellW*col + cellW*0.5 + jx;
+          var ty=0.04 + cellH*row + cellH*0.5 + jy;
+          // check min distance from all already placed eyes
+          var minDist=999;
+          for(var p=0;p<placed.length;p++){
+            var dx=(tx-placed[p].fx)/(eyeW+placed[p].ew);
+            var dy=(ty-placed[p].fy)/(eyeH+placed[p].eh);
+            var dist=Math.sqrt(dx*dx+dy*dy);
+            if(dist<minDist) minDist=dist;
+          }
+          if(minDist>bestDist){ bestDist=minDist; best={x:tx,y:ty}; }
+        }
+        // only place if there's enough room (dist ratio > 0.55 = touching ok, < 0.55 = too close)
+        if(best && bestDist>0.55){
+          placed.push({fx:best.x,fy:best.y,ew:eyeW,eh:eyeH});
+          eyeSlots.push({
+            fx:best.x, fy:best.y,
+            sz:sz,
+            rot:(Math.random()-0.5)*0.3,
+            blinkTimer:Math.random()*5000,
+            nextBlink:2500+Math.random()*5000,
+            blinking:false,
+            blinkProg:0,
+            driftAngle:Math.random()*Math.PI*2,
+            driftSpeed:0.0002+Math.random()*0.0003,
+            driftAmt:0.006+Math.random()*0.01,
+            pupilGlow:Math.random()
+          });
+        }
+      }
+    }
+  }
+  buildSlots();
+
+  // Field-level state: appear for ~10s, fade out, wait 10s, repeat
+  var field={
+    phase:'hidden',   // hidden | fading-in | visible | blinking-out | fading-out
+    timer:0,
+    cycleGap:10000,   // 10s between appearances
+    holdTime:10000,   // visible for 10s
+    fadeInSpd:0.006,  // alpha per ms
+    fadeOutSpd:0.008,
+    globalAlpha:0,
+    blinkOutCount:0   // how many blink cycles before full fade
   };
 
   var lastT=0;
   function draw(ts){
-    var dt=Math.min(ts-lastT, 80); lastT=ts;
+    var dt=Math.min(ts-lastT,80); lastT=ts;
     var e=window._vol||0;
     var musicOn=window._musicPlaying;
 
@@ -538,199 +585,210 @@ canvas#fov{position:absolute;inset:0;width:100%;height:100%;z-index:5;pointer-ev
       if(d.y>H+d.len){d.y=-d.len;d.x=Math.random()*W;}
     }
 
-    // ── Paranomly eyes — only when music is PAUSED ──
+    // ── eye field state machine ──
     if(!musicOn){
-      // slow drift
-      eyes.driftAngle+=dt*0.0004;
-      eyes.driftX=Math.sin(eyes.driftAngle)*0.018;
-      eyes.driftY=Math.cos(eyes.driftAngle*0.7)*0.012;
+      field.timer+=dt;
 
-      // phase state machine
-      eyes.appearTimer+=dt;
-      if(eyes.phase==='idle' && eyes.appearTimer>eyes.nextAppear){
-        eyes.phase='appearing';
-        eyes.appearTimer=0;
-        eyes.x=0.2+Math.random()*0.6;
-        eyes.y=0.2+Math.random()*0.35;
-        eyes.sz=0.7+Math.random()*0.7;
-        eyes.nextAppear=14000+Math.random()*18000;
+      if(field.phase==='hidden' && field.timer>field.cycleGap){
+        // rebuild slots with fresh positions/sizes each cycle
+        buildSlots();
+        field.phase='fading-in';
+        field.timer=0;
+        field.globalAlpha=0;
       }
-      if(eyes.phase==='appearing'){
-        eyes.alpha=Math.min(1,eyes.alpha+dt*0.0008);
-        if(eyes.alpha>=0.82){ eyes.phase='holding'; eyes.holdTimer=0; }
+      if(field.phase==='fading-in'){
+        field.globalAlpha=Math.min(1,field.globalAlpha+dt*field.fadeInSpd);
+        if(field.globalAlpha>=1){ field.phase='visible'; field.timer=0; }
       }
-      if(eyes.phase==='holding'){
-        eyes.holdTimer+=dt;
-        // blink during hold
-        eyes.blinkT+=dt;
-        if(!eyes.blinking && eyes.blinkT>eyes.nextBlink){
-          eyes.blinking=true; eyes.blinkProgress=0; eyes.blinkT=0;
-          eyes.nextBlink=3000+Math.random()*5000;
+      if(field.phase==='visible'){
+        if(field.timer>field.holdTime){
+          field.phase='blinking-out';
+          field.timer=0;
+          field.blinkOutCount=0;
+          // trigger all eyes to blink in sequence
+          for(var i=0;i<eyeSlots.length;i++){
+            eyeSlots[i].blinkTimer=Math.random()*800; // stagger blink start
+            eyeSlots[i].nextBlink=Math.random()*800;
+          }
         }
-        if(eyes.blinking){
-          eyes.blinkProgress+=dt*0.008;
-          if(eyes.blinkProgress>=1){ eyes.blinking=false; eyes.blinkProgress=0; }
+      }
+      if(field.phase==='blinking-out'){
+        field.timer+=0; // dt already added
+        // after 3 full blink waves, fade out
+        if(field.blinkOutCount>=3){
+          field.phase='fading-out';
+          field.timer=0;
         }
-        if(eyes.holdTimer>6000+Math.random()*8000) eyes.phase='fading';
       }
-      if(eyes.phase==='fading'){
-        eyes.alpha=Math.max(0,eyes.alpha-dt*0.0005);
-        if(eyes.alpha<=0){ eyes.phase='idle'; eyes.appearTimer=0; }
-      }
-      // pupil glow pulses slowly
-      eyes.pupilGlow=0.5+0.5*Math.sin(ts*0.0012);
-
-      // draw eye pair
-      if(eyes.alpha>0.005){
-        var ex=(eyes.x+eyes.driftX)*W;
-        var ey=(eyes.y+eyes.driftY)*H;
-        var sep=W*0.028; // gap between eyes
-        var blink=eyes.blinking ? Math.sin(eyes.blinkProgress*Math.PI) : 0;
-        drawEye(ctx,ex-sep,ey,eyes.alpha,blink,eyes.pupilGlow,eyes.sz||1.0);
-        drawEye(ctx,ex+sep,ey,eyes.alpha,blink,eyes.pupilGlow,eyes.sz||1.0);
+      if(field.phase==='fading-out'){
+        field.globalAlpha=Math.max(0,field.globalAlpha-dt*field.fadeOutSpd);
+        if(field.globalAlpha<=0){
+          field.phase='hidden';
+          field.timer=0;
+          field.globalAlpha=0;
+        }
       }
 
-      // second rarer pair
-      eyes.timer2+=dt;
-      if(eyes.phase2==='idle' && eyes.timer2>eyes.nextAppear*1.8){
-        eyes.phase2='showing';
-        eyes.timer2=0;
-        eyes.x2=0.1+Math.random()*0.8;
-        eyes.y2=0.12+Math.random()*0.25;
-        eyes.sz2=0.45+Math.random()*0.35;
-      }
-      if(eyes.phase2==='showing'){
-        eyes.alpha2=Math.min(0.55,eyes.alpha2+dt*0.0005);
-        eyes.timer2+=0; // already incremented above
-        if(eyes.alpha2>=0.55 && eyes.timer2>3000){ eyes.phase2='hiding'; }
-      }
-      if(eyes.phase2==='hiding'){
-        eyes.alpha2=Math.max(0,eyes.alpha2-dt*0.0007);
-        if(eyes.alpha2<=0){ eyes.phase2='idle'; eyes.timer2=0; }
-      }
-      if(eyes.alpha2>0.005){
-        var ex2=eyes.x2*W, ey2=eyes.y2*H;
-        var sep2=W*0.018;
-        drawEye(ctx,ex2-sep2,ey2,eyes.alpha2,0,0.3+0.3*Math.sin(ts*0.0008),eyes.sz2||0.6);
-        drawEye(ctx,ex2+sep2,ey2,eyes.alpha2,0,0.3+0.3*Math.sin(ts*0.0008),eyes.sz2||0.6);
+      // draw each eye
+      if(field.globalAlpha>0.005){
+        for(var i=0;i<eyeSlots.length;i++){
+          var s=eyeSlots[i];
+          var ex=s.fx*W, ey=s.fy*H;
+
+          // individual drift
+          s.driftAngle+=dt*s.driftSpeed;
+          var dx=Math.sin(s.driftAngle)*s.driftAmt*W;
+          var dy=Math.cos(s.driftAngle*0.7)*s.driftAmt*H*0.5;
+
+          // individual blink logic
+          s.blinkTimer+=dt;
+          if(!s.blinking && s.blinkTimer>s.nextBlink){
+            s.blinking=true; s.blinkProg=0; s.blinkTimer=0;
+            s.nextBlink=2000+Math.random()*4000;
+          }
+          var blinkVal=0;
+          if(s.blinking){
+            s.blinkProg+=dt*0.007;
+            blinkVal=Math.sin(Math.min(Math.PI,s.blinkProg));
+            if(s.blinkProg>=Math.PI){
+              s.blinking=false; s.blinkProg=0;
+              // count completed blinks for blinking-out phase
+              if(field.phase==='blinking-out') field.blinkOutCount++;
+            }
+          }
+          // pupil glow breathes
+          s.pupilGlow=0.4+0.6*Math.abs(Math.sin(ts*0.0008+i*0.4));
+
+          drawEye(ctx,ex+dx,ey+dy,field.globalAlpha,blinkVal,s.pupilGlow,s.sz,s.rot);
+        }
       }
     } else {
-      // music playing: fade eyes out quickly
-      eyes.alpha=Math.max(0,eyes.alpha-0.015);
-      eyes.alpha2=Math.max(0,eyes.alpha2-0.02);
-      eyes.phase='idle'; eyes.phase2='idle';
+      // music on: instantly kill eyes
+      if(field.globalAlpha>0){
+        field.globalAlpha=Math.max(0,field.globalAlpha-dt*0.025);
+      } else {
+        field.phase='hidden';
+        field.timer=0;
+      }
+      // still draw fading
+      if(field.globalAlpha>0.005){
+        for(var i=0;i<eyeSlots.length;i++){
+          var s=eyeSlots[i];
+          drawEye(ctx,s.fx*W,s.fy*H,field.globalAlpha,0,0.3,s.sz,s.rot);
+        }
+      }
     }
 
     requestAnimationFrame(draw);
   }
 
-  function drawEye(ctx,x,y,alpha,blink,glow,sz){
-    sz=sz||1;
-    var rW=W*(0.032*sz), rH=H*(0.052*sz);
+  // ── draw a single almond-shaped eye ──
+  function drawEye(ctx,x,y,alpha,blink,glow,sz,rot){
+    sz=sz||1; rot=rot||0;
+    var rW=W*(0.045*sz), rH=H*(0.068*sz);
     ctx.save();
     ctx.translate(x,y);
+    ctx.rotate(rot);
 
-    // subtle dark soft shadow behind the whole eye
-    var shadow=ctx.createRadialGradient(0,rH*0.1,0,0,0,rW*2.2);
-    shadow.addColorStop(0,'rgba(0,0,0,'+(alpha*0.55)+')');
+    // soft dark shadow behind
+    var shadow=ctx.createRadialGradient(0,rH*0.08,0,0,0,rW*2);
+    shadow.addColorStop(0,'rgba(0,0,0,'+(alpha*0.6)+')');
     shadow.addColorStop(1,'rgba(0,0,0,0)');
     ctx.fillStyle=shadow;
     ctx.beginPath();
-    ctx.ellipse(0,rH*0.1,rW*2.2,rH*1.6,0,0,Math.PI*2);
+    ctx.ellipse(0,rH*0.08,rW*2,rH*1.5,0,0,Math.PI*2);
     ctx.fill();
 
     // blink squish
-    var bs=1-blink*0.96;
-    ctx.scale(1,bs);
+    ctx.scale(1, Math.max(0.02, 1-blink*0.97));
 
-    // ── eye shape using bezier (almond) ──
-    ctx.beginPath();
-    ctx.moveTo(-rW,0);
-    ctx.bezierCurveTo(-rW*0.5,-rH*1.05, rW*0.5,-rH*1.05, rW,0);
-    ctx.bezierCurveTo( rW*0.5, rH*0.85,-rW*0.5, rH*0.85,-rW,0);
-    ctx.closePath();
+    // almond eye path
+    function eyePath(){
+      ctx.beginPath();
+      ctx.moveTo(-rW,0);
+      ctx.bezierCurveTo(-rW*0.4,-rH*1.1, rW*0.4,-rH*1.1, rW,0);
+      ctx.bezierCurveTo( rW*0.4, rH*0.9,-rW*0.4, rH*0.9,-rW,0);
+      ctx.closePath();
+    }
 
-    // sclera — off-white pinkish like the reference
-    var sclera=ctx.createRadialGradient(-rW*0.1,-rH*0.15,0,0,0,rW*1.05);
-    sclera.addColorStop(0,'rgba(235,222,218,'+(alpha*0.97)+')');
-    sclera.addColorStop(0.55,'rgba(210,195,192,'+(alpha*0.9)+')');
-    sclera.addColorStop(1,'rgba(175,158,155,'+(alpha*0.75)+')');
-    ctx.fillStyle=sclera;
+    eyePath();
+
+    // sclera gradient — deep red, brighter center, darker blood-red at edges
+    var scl=ctx.createRadialGradient(-rW*0.1,-rH*0.2,rW*0.05,-rW*0.05,-rH*0.1,rW*1.1);
+    scl.addColorStop(0,'rgba(200,40,40,'+(alpha*0.98)+')');
+    scl.addColorStop(0.4,'rgba(165,20,20,'+(alpha*0.93)+')');
+    scl.addColorStop(0.75,'rgba(110,8,8,'+(alpha*0.85)+')');
+    scl.addColorStop(1,'rgba(60,2,2,'+(alpha*0.7)+')');
+    ctx.fillStyle=scl;
     ctx.fill();
 
-    // dark eyelid rim / shadow at top and bottom edges
+    // clip everything inside the eye shape
     ctx.save();
-    ctx.clip(); // clip to eye shape
-    // top shadow
-    var topShadow=ctx.createLinearGradient(0,-rH,0,-rH*0.2);
-    topShadow.addColorStop(0,'rgba(20,15,15,'+(alpha*0.7)+')');
-    topShadow.addColorStop(1,'rgba(20,15,15,0)');
-    ctx.fillStyle=topShadow;
-    ctx.fillRect(-rW*1.2,-rH*1.2,rW*2.4,rH*1.1);
-    // bottom shadow
-    var botShadow=ctx.createLinearGradient(0,rH*0.3,0,rH);
-    botShadow.addColorStop(0,'rgba(20,15,15,0)');
-    botShadow.addColorStop(1,'rgba(20,15,15,'+(alpha*0.55)+')');
-    ctx.fillStyle=botShadow;
-    ctx.fillRect(-rW*1.2,rH*0.2,rW*2.4,rH*0.9);
-    ctx.restore();
-
-    // ── pupil — large black circle like reference ──
-    ctx.save();
+    eyePath();
     ctx.clip();
-    // pupil slight offset down-center like reference
-    var px=rW*0.04, py=rH*0.05;
-    var pupilR=rW*0.62;
-    // pupil base — near-black with very slight dark purple tint
-    ctx.fillStyle='rgba(8,6,10,'+(alpha*0.97)+')';
-    ctx.beginPath();
-    ctx.ellipse(px,py,pupilR,pupilR*1.08,0,0,Math.PI*2);
-    ctx.fill();
-    // inner depth — pure black center
-    ctx.fillStyle='rgba(2,2,4,'+(alpha)+')';
-    ctx.beginPath();
-    ctx.ellipse(px,py,pupilR*0.72,pupilR*0.78,0,0,Math.PI*2);
-    ctx.fill();
-    // very faint white sclera gleam around pupil edge (limbal ring style)
-    var limbal=ctx.createRadialGradient(px,py,pupilR*0.78,px,py,pupilR*1.02);
-    limbal.addColorStop(0,'rgba(200,188,185,'+(alpha*0.0)+')');
-    limbal.addColorStop(1,'rgba(200,188,185,'+(alpha*0.12)+')');
-    ctx.fillStyle=limbal;
-    ctx.beginPath();
-    ctx.ellipse(px,py,pupilR*1.02,pupilR*1.1,0,0,Math.PI*2);
-    ctx.fill();
-    // specular highlight — small bright catch light top-left of pupil
-    ctx.fillStyle='rgba(240,235,230,'+(alpha*(0.55+glow*0.3))+')';
-    ctx.beginPath();
-    ctx.ellipse(px-pupilR*0.28,py-pupilR*0.3,pupilR*0.14,pupilR*0.1,-0.4,0,Math.PI*2);
-    ctx.fill();
-    // tiny secondary catch light
-    ctx.fillStyle='rgba(220,215,210,'+(alpha*0.25)+')';
-    ctx.beginPath();
-    ctx.ellipse(px+pupilR*0.22,py-pupilR*0.18,pupilR*0.07,pupilR*0.05,0.3,0,Math.PI*2);
-    ctx.fill();
-    ctx.restore();
 
-    // outer eyelid dark outline
+    // top eyelid shadow
+    var topSh=ctx.createLinearGradient(0,-rH*1.1,0,-rH*0.1);
+    topSh.addColorStop(0,'rgba(6,2,2,'+(alpha*0.88)+')');
+    topSh.addColorStop(0.6,'rgba(6,2,2,'+(alpha*0.28)+')');
+    topSh.addColorStop(1,'rgba(6,2,2,0)');
+    ctx.fillStyle=topSh;
+    ctx.fillRect(-rW*1.2,-rH*1.2,rW*2.4,rH*1.15);
+
+    // bottom eyelid shadow
+    var botSh=ctx.createLinearGradient(0,rH*0.25,0,rH*0.95);
+    botSh.addColorStop(0,'rgba(12,8,8,0)');
+    botSh.addColorStop(1,'rgba(12,8,8,'+(alpha*0.5)+')');
+    ctx.fillStyle=botSh;
+    ctx.fillRect(-rW*1.2,rH*0.2,rW*2.4,rH*0.85);
+
+    // large black pupil — offset slightly toward center-bottom like ref
+    var px=rW*0.03, py=rH*0.08;
+    var pr=rW*0.63;
+    // outer pupil (very dark, slight purple-black)
+    ctx.fillStyle='rgba(6,4,9,'+(alpha*0.98)+')';
     ctx.beginPath();
-    ctx.moveTo(-rW,0);
-    ctx.bezierCurveTo(-rW*0.5,-rH*1.05, rW*0.5,-rH*1.05, rW,0);
-    ctx.bezierCurveTo( rW*0.5, rH*0.85,-rW*0.5, rH*0.85,-rW,0);
-    ctx.closePath();
-    ctx.strokeStyle='rgba(18,12,12,'+(alpha*0.85)+')';
-    ctx.lineWidth=rW*0.08;
+    ctx.ellipse(px,py,pr,pr*1.06,0,0,Math.PI*2);
+    ctx.fill();
+    // pure black center
+    ctx.fillStyle='rgba(2,1,3,'+alpha+')';
+    ctx.beginPath();
+    ctx.ellipse(px,py,pr*0.68,pr*0.72,0,0,Math.PI*2);
+    ctx.fill();
+    // limbal ring — subtle dark ring at pupil edge blending into red sclera
+    var limb=ctx.createRadialGradient(px,py,pr*0.75,px,py,pr*1.04);
+    limb.addColorStop(0,'rgba(80,5,5,0)');
+    limb.addColorStop(1,'rgba(80,5,5,'+(alpha*0.18)+')');
+    ctx.fillStyle=limb;
+    ctx.beginPath();
+    ctx.ellipse(px,py,pr*1.04,pr*1.08,0,0,Math.PI*2);
+    ctx.fill();
+    // main catch light — top left
+    ctx.fillStyle='rgba(245,238,232,'+(alpha*(0.6+glow*0.35))+')';
+    ctx.beginPath();
+    ctx.ellipse(px-pr*0.3,py-pr*0.32,pr*0.15,pr*0.1,-0.3,0,Math.PI*2);
+    ctx.fill();
+    // small secondary catch light
+    ctx.fillStyle='rgba(225,218,212,'+(alpha*0.28)+')';
+    ctx.beginPath();
+    ctx.ellipse(px+pr*0.2,py-pr*0.16,pr*0.07,pr*0.05,0.5,0,Math.PI*2);
+    ctx.fill();
+
+    ctx.restore(); // end clip
+
+    // outline — dark eyelid rim
+    eyePath();
+    ctx.strokeStyle='rgba(14,9,9,'+(alpha*0.9)+')';
+    ctx.lineWidth=Math.max(1,rW*0.07);
     ctx.stroke();
 
-    // very faint ambient glow — pale, not red
-    ctx.restore();
-    var ambGlow=ctx.createRadialGradient(x,y,0,x,y,rW*2.8);
-    ambGlow.addColorStop(0,'rgba(200,185,180,'+(alpha*0.06)+')');
-    ambGlow.addColorStop(1,'rgba(200,185,180,0)');
-    ctx.fillStyle=ambGlow;
+    // tiny corner tear-duct hints
+    ctx.fillStyle='rgba(120,10,10,'+(alpha*0.4)+')';
     ctx.beginPath();
-    ctx.ellipse(x,y,rW*2.8,rH*2.2,0,0,Math.PI*2);
+    ctx.ellipse(-rW*0.95,0,rW*0.08,rH*0.12,0,0,Math.PI*2);
     ctx.fill();
-    return; // already restored above
+
+    ctx.restore();
   }
 
   requestAnimationFrame(draw);
